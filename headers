@@ -1,0 +1,38 @@
+#ifndef ADAS_ECU_H
+#define ADAS_ECU_H
+
+#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// OLED Configuration
+#define SCREEN_WIDTH        128
+#define SCREEN_HEIGHT       64
+#define OLED_I2C_ADDRESS    0x3C
+
+// Hardware Pin Definitions (STM32)
+#define PIN_TRIG            PA0
+#define PIN_ECHO            PA1
+#define PIN_IR_LEFT         PA2
+#define PIN_IR_RIGHT        PA3
+#define PIN_LDR_EXTI        PA4
+#define PIN_BUZZER          PA8
+#define PIN_HEADLIGHT       PC13
+
+// Thresholds
+#define CRITICAL_DIST_CM    10.0f
+#define WARNING_DIST_CM     35.0f
+#define MAX_VALID_DIST_CM   400.0f
+
+// Global Display Instance
+extern Adafruit_SSD1306 display;
+extern volatile bool isLowLight;
+
+// Function Prototypes
+void handleLDRInterrupt();
+float getUltrasonicDistanceCM();
+void updateBuzzerPWM(float distance);
+void updateOLED(float distance, bool irLeft, bool irRight);
+
+#endif // ADAS_ECU_H
