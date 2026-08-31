@@ -1,0 +1,145 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+// Hardware Pin Definitions
+#define PIN_TRIG        PA0
+#define PIN_ECHO        PA1
+#define PIN_IR_LEFT     PA2
+#define PIN_IR_RIGHT    PA3
+#define PIN_LDR_EXTI    PA4
+#define PIN_BUZZER      PA8
+#define PIN_HEADLIGHT   PC13
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+// Global Volatile variables modified by EXTI
+volatile bool isLowLight = false;
+
+// Interrupt Service Routine (ISR) for LDR Light Sensor
+// Removed ESP32-specific IRAM_ATTR macro - standard void is correct for STM32
+void handleLDRInterrupt() {
+  // Toggle status based on digital input from LDR module
+  isLowLight = (digitalRead(PIN_LDR_EXTI) == HIGH);
+  digitalWrite(PIN_HEADLIGHT, isLowLight ? LOW : HIGH); // Active LOW LED on BluePill
+}
+
+// Function to measure distance using HC-SR04 Ultrasonic Sensor
+float getUltrasonicDistanceCM() {
+  digitalWrite(PIN_TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(PIN_TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(PIN_TRIG, LOW);
+
+  long duration = pulseIn(PIN_ECHO, HIGH, 30000); // 30ms timeout (~500cm max)
+  if (duration == 0) return 999.0f; // Out of range or timeout
+  
+  return (float)duration * 0.0343f / 2.0f;
+}
+
+// Driver to adjust Buzzer PWM Frequency based on Proximity
+void updateBuzzerPWM(float distance) {
+  if (distance < 10.0f) {
+    tone(PIN_BUZZER, 2000); // Fast, high-pitch continuous alarm
+  } else if (distance >= 10.0f && distance <= 35.0f) {
+    int pitch = map((int)distance, 10, 35, 1800, 800);
+    tone(PIN_BUZZER, pitch, 80); // Dynamic pitch beep
+  } else {
+    noTone(PIN_BUZZER); // Mute
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // Pin Configuration
+  pinMode(PIN_TRIG, OUTPUT);
+  pinMode(PIN_ECHO, INPUT);
+  pinMode(PIN_IR_LEFT, INPUT);
+  pinMode(PIN_IR_RIGHT, INPUT);
+  pinMode(PIN_LDR_EXTI, INPUT_PULLUP);
+  pinMode(PIN_HEADLIGHT, OUTPUT);
+  pinMode(PIN_BUZZER, OUTPUT);
+
+  // Initialize SSD1306 OLED (I2C address usually 0x3C)
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+
+  // Attach EXTI interrupt to LDR Pin for auto-headlights
+  attachInterrupt(digitalPinToInterrupt(PIN_LDR_EXTI), handleLDRInterrupt, CHANGE);
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(10, 25);
+  display.println(F("ADAS DIAGNOSTIC BOOT"));
+  display.display();
+  delay(1500);
+}
+
+void loop() {
+  // 1. Read Sensors
+  float distance = getUltrasonicDistanceCM();
+  bool irLeft = digitalRead(PIN_IR_LEFT);
+  bool irRight = digitalRead(PIN_IR_RIGHT);
+
+  // 2. Drive PWM Audio Pitch
+  updateBuzzerPWM(distance);
+
+  // 3. Serial Monitor Diagnostics Logging
+  Serial.print("Distance: "); Serial.print(distance); Serial.print(" cm | ");
+  Serial.print("IR Left: "); Serial.print(irLeft); Serial.print(" | ");
+  Serial.print("IR Right: "); Serial.print(irRight); Serial.print(" | ");
+  Serial.print("Light Interrupt: "); Serial.println(isLowLight ? "DARK" : "BRIGHT");
+
+  // 4. Update SSD1306 OLED Telemetry UI
+  display.clearDisplay();
+  
+  // Header
+  display.setTextSize(1);
+  display.setCursor(18, 0);
+  display.println(F("ADAS DIAGNOSTICS"));
+  display.drawLine(0, 10, 128, 10, SSD1306_WHITE);
+
+  // Telemetry Rows
+  display.setCursor(0, 16);
+  display.print(F("DIST  : "));
+  if (distance > 400.0f) {
+    display.println(F("OUT OF RANGE"));
+  } else {
+    display.print(distance, 1);
+    display.println(F(" cm"));
+  }
+
+  display.setCursor(0, 28);
+  display.print(F("LANES : L["));
+  display.print(irLeft ? "1" : "0");
+  display.print(F("] R["));
+  display.print(irRight ? "1" : "0");
+  display.println(F("]"));
+
+  display.setCursor(0, 40);
+  display.print(F("LIGHT : "));
+  display.println(isLowLight ? "DARK (LIGHTS ON)" : "BRIGHT (OFF)");
+
+  // Bottom Warning Status Line
+  display.drawLine(0, 52, 128, 52, SSD1306_WHITE);
+  display.setCursor(0, 55);
+  if (distance < 10.0f) {
+    display.println(F(">> CRITICAL PROXIMITY <<"));
+  } else if (irLeft || irRight) {
+    display.println(F(">> LANE DRIFT DETECTED <<"));
+  } else {
+    display.println(F("SYSTEM STATUS: NORMAL"));
+  }
+
+  display.display();
+  delay(100); // 10 Hz telemetry loop refresh rate
+}
