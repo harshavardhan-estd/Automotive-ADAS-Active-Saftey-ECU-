@@ -1,0 +1,9 @@
+[env:bluepill_f103c8]
+platform = ststm32
+board = bluepill_f103c8
+framework = arduino
+upload_protocol = stm32cube
+
+lib_deps =
+    adafruit/Adafruit GFX Library @ ^1.12.6
+    adafruit/Adafruit SSD1306 @ ^2.5.17
